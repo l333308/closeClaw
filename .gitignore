@@ -27,6 +27,20 @@ go.work.sum
 # env file
 .env
 
+# python venv
+.venv/
+__pycache__/
+*.py[cod]
+bin/
+logs/
+
+# 中间产物（TTS、视频等）
+output/videos/
+output/tts/
+# assets 目录保留（素材库需纳入版本管理），但忽略生成的视频
+output/assets/*.mp4
+output/assets/*.mov
+
 # Editor/IDE
 # .idea/
 # .vscode/
