@@ -44,3 +44,4 @@ output/assets/*.mov
 # Editor/IDE
 # .idea/
 # .vscode/
+.DS_Store

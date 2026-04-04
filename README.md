@@ -36,6 +36,7 @@ closeClaw/
 │   ├── writer/              # Claude 生成文案（双源）
 │   ├── video/               # edge-tts + FFmpeg 合成视频
 │   └── publisher/           # Webhook 通知人工发布
+├── models/                  # 仓库内置 embedding 模型
 ├── shared/schema/           # 共享消息结构（Go + Python）
 ├── podman-compose.yml       # 基础设施（RabbitMQ / Redis / Chroma）
 ├── Makefile
@@ -58,7 +59,7 @@ closeClaw/
 
 - **Go** 1.23+
 - **Python** 3.11+
-- **Podman** + **podman-compose**
+- **Docker Compose**、**Podman Compose** 或 **podman-compose**（三选一即可）
 - **FFmpeg**（视频合成阶段需要）
 
 ## 配置
@@ -93,17 +94,44 @@ WEBHOOK_TYPE=feishu
 PUBLISH_WEBHOOK_URL=...
 ```
 
+### 本地 embedding 模型
+
+仓库内已内置 `dedup` 使用的 sentence-transformers 模型：
+
+- 默认目录：`models/all-MiniLM-L6-v2/`
+- 当前体积：约 `87MB`
+- 默认行为：`dedup` 会优先读取仓库内本地模型；仅当本地目录不存在时，才回退到远端模型名下载
+
+这意味着：
+
+- 新机器拉取仓库后，无需再等待首次 embedding 模型下载
+- 内网、弱网或代理不稳定环境下，`dedup` 启动更稳定
+- 如果你想替换模型，可通过环境变量 `DEDUP_MODEL_PATH` 或 `DEDUP_MODEL_NAME` 覆盖默认值
+
 ## 启动
 
-### 1. 启动基础设施
+```bash
+brew install ffmpeg-full
+```
 
+### 1. 启动基础设施
 ```bash
 make infra
 ```
 
+`Makefile` 会自动按以下优先级检测 compose 命令：`docker compose` -> `podman compose` -> `podman-compose`。
+
 启动后可访问：
 - RabbitMQ 管理界面：http://localhost:15672（用户名/密码：`closeclaw`）
 - Chroma API：http://localhost:8000
+
+如果你想清空所有已存储的数据（包括 Redis 状态、RabbitMQ 持久化消息、Chroma 向量数据），可执行：
+
+```bash
+make reset-data
+```
+
+执行后会删除 compose volumes；如需继续使用，请重新执行 `make infra`。
 
 ### 2. 安装 Python 依赖
 
@@ -135,6 +163,8 @@ logs/writer.log
 logs/video.log
 logs/publisher.log
 ```
+
+其中 `dedup` 会默认加载仓库内 `models/all-MiniLM-L6-v2/`，因此正常情况下不再依赖 Hugging Face 首次在线下载。
 
 停止所有 agents：
 
@@ -169,6 +199,7 @@ echo > logs/*.log # 清空 log 文件内容
 make infra         启动 RabbitMQ / Redis / Chroma
 make infra-down    停止并清理容器
 make infra-logs    查看基础设施日志
+make reset-data    删除 RabbitMQ / Redis / Chroma 持久化数据（含向量数据）
 make build         编译 Go Orchestrator
 make run           构建并启动 Orchestrator（前台）后续可看到 任务pipeline执行情况
 make venv          创建 Python 虚拟环境并安装依赖

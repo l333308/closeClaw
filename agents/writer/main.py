@@ -11,6 +11,7 @@ import json
 import os
 import sys
 from dataclasses import dataclass
+from urllib.parse import urlparse, urlunparse
 
 from openai import OpenAI, APIError
 
@@ -19,6 +20,7 @@ from shared.schema.job import CopyResult, Job, Stage, Status, StageMessage
 from agents.base import consume_queue, advance_job, fail_job, log
 
 QUEUE_NAME = "closeclaw.write"
+CLAUDE_REQUEST_TIMEOUT = float(os.getenv("CLAUDE_REQUEST_TIMEOUT", "25"))
 
 
 @dataclass
@@ -48,6 +50,15 @@ def _load_sources() -> list[ClaudeSource]:
     return [s for s in candidates if s.api_key and s.base_url]
 
 
+def _normalize_base_url(base_url: str) -> str:
+    """将 OpenAI 兼容源统一规范到 /v1 根路径。"""
+    parsed = urlparse(base_url.strip())
+    path = parsed.path.rstrip("/")
+    if not path.endswith("/v1"):
+        path = f"{path}/v1" if path else "/v1"
+    return urlunparse(parsed._replace(path=path))
+
+
 SYSTEM_PROMPT = """你是一个专业的短视频文案创作者，擅长 AI 科技内容。
 根据提供的热点摘要，生成一条适合抖音/TikTok 的短视频文案，输出严格 JSON：
 {
@@ -60,7 +71,20 @@ SYSTEM_PROMPT = """你是一个专业的短视频文案创作者，擅长 AI 科
 
 def _call_source(source: ClaudeSource, user_msg: str) -> CopyResult:
     """调用单个 Claude 源，返回 CopyResult（失败则抛出异常）。"""
-    client = OpenAI(api_key=source.api_key, base_url=source.base_url)
+    base_url = _normalize_base_url(source.base_url)
+    client = OpenAI(
+        api_key=source.api_key,
+        base_url=base_url,
+        timeout=CLAUDE_REQUEST_TIMEOUT,
+        max_retries=0,
+    )
+    log.info(
+        "calling source=%s base_url=%s model=%s timeout=%ss",
+        source.name,
+        base_url,
+        source.model,
+        int(CLAUDE_REQUEST_TIMEOUT),
+    )
     resp = client.chat.completions.create(
         model=source.model,
         max_tokens=512,
@@ -103,7 +127,14 @@ def generate_copy(title: str, summary: str, keywords: list[str]) -> CopyResult:
             log.info("copy generated via source=%s model=%s", source.name, source.model)
             return result
         except Exception as exc:
-            log.warning("source=%s failed: %s, trying next...", source.name, exc)
+            log.warning(
+                "source=%s base_url=%s model=%s failed (%s): %s, trying next...",
+                source.name,
+                _normalize_base_url(source.base_url),
+                source.model,
+                type(exc).__name__,
+                exc,
+            )
             last_exc = exc
 
     raise RuntimeError(f"all Claude sources failed, last error: {last_exc}")

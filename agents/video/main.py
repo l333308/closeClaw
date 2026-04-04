@@ -25,6 +25,7 @@
 from __future__ import annotations
 
 import asyncio
+import functools
 import hashlib
 import os
 import subprocess
@@ -174,6 +175,36 @@ def _escape(text: str) -> str:
     )
 
 
+@functools.lru_cache(maxsize=1)
+def _ffmpeg_filters_output() -> str:
+    """返回 ffmpeg -filters 输出，用于能力探测。"""
+    try:
+        result = subprocess.run(
+            ["ffmpeg", "-filters"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except FileNotFoundError:
+        return ""
+
+    return f"{result.stdout}\n{result.stderr}"
+
+
+def ffmpeg_supports_filter(name: str) -> bool:
+    """检测当前 ffmpeg 是否内置指定滤镜。"""
+    filters_output = _ffmpeg_filters_output()
+    return f" {name} " in filters_output or filters_output.strip().endswith(name)
+
+
+def ffmpeg_supports_subtitles() -> bool:
+    return ffmpeg_supports_filter("subtitles")
+
+
+def ffmpeg_supports_drawtext() -> bool:
+    return ffmpeg_supports_filter("drawtext")
+
+
 def _build_filter(
     font: str,
     safe_title: str,
@@ -188,6 +219,7 @@ def _build_filter(
     font_name = Path(font).stem if font else "sans"
 
     has_srt = bool(srt_path and os.path.exists(srt_path) and os.path.getsize(srt_path) > 0)
+    has_drawtext = ffmpeg_supports_drawtext()
 
     if has_bg_video:
         # 背景视频：缩放 + 裁剪适配竖屏
@@ -224,23 +256,29 @@ def _build_filter(
     brand = (
         f"[bg]"
         f"drawbox=x=0:y=0:w=iw:h=150:color=black@0.65:thickness=fill,"
-        f"drawbox=x=0:y=150:w=iw:h=4:color={ACCENT_COLOR}@1:thickness=fill,"
-        f"drawtext=text='AI 头条'{font_opt}:fontsize=52:fontcolor={ACCENT_COLOR}:"
-        f"x=(w-text_w)/2:y=50"
-        f"[branded];"
+        f"drawbox=x=0:y=150:w=iw:h=4:color={ACCENT_COLOR}@1:thickness=fill"
     )
+    if has_drawtext:
+        brand += (
+            f",drawtext=text='AI 头条'{font_opt}:fontsize=52:fontcolor={ACCENT_COLOR}:"
+            f"x=(w-text_w)/2:y=50"
+        )
+    brand += "[branded];"
 
     # 标题（前 0.4s 从屏幕外滑入）
-    title = (
-        f"[branded]"
-        f"drawtext=text='{safe_title}'{font_opt}:"
-        f"fontsize=64:fontcolor=white:"
-        f"x=(w-text_w)/2:"
-        f"y=if(gte(t\\,0.4)\\,220\\,220+(-0.4+t)*(-500)):"
-        f"shadowcolor=black@0.9:shadowx=3:shadowy=3:"
-        f"borderw=2:bordercolor=black@0.4"
-        f"[titled];"
-    )
+    if has_drawtext:
+        title = (
+            f"[branded]"
+            f"drawtext=text='{safe_title}'{font_opt}:"
+            f"fontsize=64:fontcolor=white:"
+            f"x=(w-text_w)/2:"
+            f"y=if(gte(t\\,0.4)\\,220\\,220+(-0.4+t)*(-500)):"
+            f"shadowcolor=black@0.9:shadowx=3:shadowy=3:"
+            f"borderw=2:bordercolor=black@0.4"
+            f"[titled];"
+        )
+    else:
+        title = "[branded]copy[titled];"
 
     # 底部字幕区渐变遮罩
     sub_mask = (
@@ -265,7 +303,13 @@ def _build_filter(
 
     # 字幕 subtitles 滤镜
     if has_srt:
-        escaped_srt = srt_path.replace("\\", "/").replace(":", "\\:")
+        escaped_srt = (
+            srt_path
+            .replace("\\", "/")
+            .replace(":", "\\:")
+            .replace(",", "\\,")
+            .replace("'", r"\'")
+        )
         style = (
             f"FontName={font_name},"
             f"Fontsize=44,"
@@ -276,7 +320,8 @@ def _build_filter(
             f"Alignment=2,"
             f"MarginV=100"
         )
-        subs = f"{prev}subtitles='{escaped_srt}':force_style='{style}'[v]"
+        style = style.replace(",", r"\,").replace("'", r"\'")
+        subs = f"{prev}subtitles=filename='{escaped_srt}':force_style='{style}'[v]"
         out = "[v]"
     else:
         # 无字幕时直接输出
@@ -318,9 +363,14 @@ def compose_video(
         ]
         log.info("using built-in animated gradient background")
 
-    fc, out, audio_idx = _build_filter(
-        font, safe_title, srt_path, bool(bg), audio_duration
-    )
+    subtitle_supported = ffmpeg_supports_subtitles()
+    if srt_path and not subtitle_supported:
+        log.warning("ffmpeg subtitles filter unavailable; generating video without burned-in subtitles")
+        srt_path = ""
+    if not ffmpeg_supports_drawtext():
+        log.warning("ffmpeg drawtext filter unavailable; generating video without title text overlays")
+
+    fc, out, audio_idx = _build_filter(font, safe_title, srt_path, bool(bg), audio_duration)
 
     cmd = [
         "ffmpeg", "-y",

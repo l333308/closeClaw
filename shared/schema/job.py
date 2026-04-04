@@ -10,6 +10,18 @@ import base64
 import json
 
 
+def _parse_datetime(value: str) -> datetime:
+    """兼容 Go/Python 间小数秒位数不一致的 ISO 时间。"""
+    value = value.rstrip("Z")
+    if "." not in value:
+        return datetime.fromisoformat(value)
+
+    main, frac = value.split(".", 1)
+    frac = "".join(ch for ch in frac if ch.isdigit())
+    frac = (frac + "000000")[:6]
+    return datetime.fromisoformat(f"{main}.{frac}")
+
+
 class Stage(str, Enum):
     CRAWL = "crawl"
     DEDUP = "dedup"
@@ -51,8 +63,7 @@ class HotTopic:
     @classmethod
     def from_dict(cls, d: dict) -> "HotTopic":
         d = dict(d)
-        ts = d["created_at"].rstrip("Z")
-        d["created_at"] = datetime.fromisoformat(ts)
+        d["created_at"] = _parse_datetime(d["created_at"])
         return cls(**d)
 
 
@@ -144,8 +155,8 @@ class Job:
             id=d["id"],
             stage=Stage(d["stage"]),
             status=Status(d["status"]),
-            created_at=datetime.fromisoformat(d["created_at"].rstrip("Z")),
-            updated_at=datetime.fromisoformat(d["updated_at"].rstrip("Z")),
+            created_at=_parse_datetime(d["created_at"]),
+            updated_at=_parse_datetime(d["updated_at"]),
             error=d.get("error", ""),
             topic=HotTopic.from_dict(d["topic"]) if d.get("topic") else None,
             analysis=AnalysisResult.from_dict(d["analysis"]) if d.get("analysis") else None,

@@ -1,9 +1,11 @@
-version: "3.9"
-
 services:
   rabbitmq:
     image: docker.io/rabbitmq:3-management
     container_name: closeclaw-rabbitmq
+    entrypoint:
+      - sh
+      - -lc
+      - chown -R rabbitmq:rabbitmq /var/lib/rabbitmq && exec docker-entrypoint.sh rabbitmq-server
     ports:
       - "5672:5672"
       - "15672:15672"
@@ -11,7 +13,11 @@ services:
       RABBITMQ_DEFAULT_USER: closeclaw
       RABBITMQ_DEFAULT_PASS: closeclaw
     volumes:
-      - rabbitmq_data:/var/lib/rabbitmq
+      - type: volume
+        source: rabbitmq_data
+        target: /var/lib/rabbitmq
+        volume:
+          nocopy: true
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "ping"]
       interval: 10s
@@ -33,7 +39,7 @@ services:
       retries: 5
 
   chroma:
-    image: docker.io/chromadb/chroma:latest
+    image: ghcr.io/chroma-core/chroma:latest
     container_name: closeclaw-chroma
     ports:
       - "8000:8000"
@@ -42,11 +48,6 @@ services:
     environment:
       CHROMA_SERVER_AUTH_CREDENTIALS_PROVIDER: ""
       ANONYMIZED_TELEMETRY: "false"
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/heartbeat"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
 
 volumes:
   rabbitmq_data:
