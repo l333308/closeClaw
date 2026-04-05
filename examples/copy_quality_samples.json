@@ -1,0 +1,72 @@
+[
+  {
+    "id": "claude_leak",
+    "title": "Claude 代码细节意外曝光",
+    "analysis": {
+      "summary": "Claude 相关实现细节曝光，引发行业对模型壁垒的重估。",
+      "keywords": ["Claude", "模型壁垒", "AI"],
+      "sentiment": "negative",
+      "relevance": 0.98,
+      "core_point": "AI 护城河可能没想象中那么深。",
+      "why_it_matters": "这会影响大家对头部模型定价权和技术壁垒的判断。",
+      "impact_on_people": "开发者机会可能变多，模型公司竞争压力会更大。",
+      "stance_hint": "这不是普通泄露事件，而是一次行业估值逻辑松动。 "
+    }
+  },
+  {
+    "id": "open_source_catchup",
+    "title": "开源模型性能逼近头部闭源模型",
+    "analysis": {
+      "summary": "开源模型能力快速追近闭源头部产品。",
+      "keywords": ["开源模型", "成本", "创业"],
+      "sentiment": "positive",
+      "relevance": 0.97,
+      "core_point": "模型能力差距正在被快速抹平。",
+      "why_it_matters": "AI 的门槛和定价权都可能被重新改写。",
+      "impact_on_people": "开发者成本更低，小团队试错更快，创业窗口更大。",
+      "stance_hint": "真正的机会不一定在造模型，而在用模型更快赚钱。"
+    }
+  },
+  {
+    "id": "ai_browser",
+    "title": "大厂发布原生 AI 浏览器",
+    "analysis": {
+      "summary": "AI 浏览器把搜索、助手和工作流整合到同一入口。",
+      "keywords": ["AI 浏览器", "入口", "搜索"],
+      "sentiment": "positive",
+      "relevance": 0.95,
+      "core_point": "下一轮竞争重点可能不是模型，而是用户入口。",
+      "why_it_matters": "谁占住入口，谁就更可能占住用户和分发。",
+      "impact_on_people": "普通用户获取信息的方式会变，创作者流量来源也会变。",
+      "stance_hint": "别只盯着模型参数，真正值钱的是入口。"
+    }
+  },
+  {
+    "id": "chip_restriction",
+    "title": "AI 芯片出口限制再升级",
+    "analysis": {
+      "summary": "AI 芯片限制升级，算力供应链再受影响。",
+      "keywords": ["芯片", "算力", "供应链"],
+      "sentiment": "negative",
+      "relevance": 0.96,
+      "core_point": "算力卡脖子仍然是 AI 竞争的底层变量。",
+      "why_it_matters": "没有稳定算力，再强的模型路线图也很难兑现。",
+      "impact_on_people": "训练成本和产品价格都可能继续被抬高。",
+      "stance_hint": "这不是地缘新闻，而是 AI 成本结构的直接打击。"
+    }
+  },
+  {
+    "id": "agent_workflow",
+    "title": "新 Agent 工作流平台爆红",
+    "analysis": {
+      "summary": "一款 Agent 工作流平台快速走红，企业自动化需求升温。",
+      "keywords": ["Agent", "自动化", "工作流"],
+      "sentiment": "positive",
+      "relevance": 0.94,
+      "core_point": "Agent 的价值开始从 demo 走向可落地流程。",
+      "why_it_matters": "AI 商业化正在从模型能力转向交付结果。",
+      "impact_on_people": "普通岗位会更快接触自动化，重复劳动会进一步被压缩。",
+      "stance_hint": "下一波赢家未必是模型公司，而是最先把 Agent 接进业务的人。"
+    }
+  }
+]

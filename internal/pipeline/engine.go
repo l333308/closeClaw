@@ -2,7 +2,7 @@
 //
 // Pipeline 拓扑：
 //
-//	crawl → dedup → [analyze ∥ write] → video → publish
+//	crawl → dedup → [analyze ∥ write] → review → video → publish
 //
 // analyze 与 write 并行执行（write 依赖 analyze 结果时串行，
 // 当前 MVP 实现为串行以保持简单，后续可拆分并行 goroutine）。
@@ -23,8 +23,8 @@ import (
 
 // Engine 负责创建 Job 并推送到第一个队列，驱动 pipeline 启动
 type Engine struct {
-	q   *queue.Client
-	r   *cache.Client
+	q *queue.Client
+	r *cache.Client
 }
 
 // New 创建 Engine
@@ -67,7 +67,7 @@ func (e *Engine) StartJob(ctx context.Context) (*schema.Job, error) {
 // Advance 将 Job 推进到下一阶段
 // 由各 Python Agent 完成本阶段后，通过 HTTP 回调触发
 func (e *Engine) Advance(ctx context.Context, jobID string, updatedJob *schema.Job) error {
-	nextQueue, ok := nextStageQueue(updatedJob.Stage)
+	nextQueue, nextStage, ok := nextStageRoute(updatedJob)
 	if !ok {
 		slog.Info("pipeline completed", "job_id", jobID)
 		return e.r.SetStage(ctx, jobID, string(updatedJob.Stage), string(schema.StatusDone))
@@ -88,7 +88,7 @@ func (e *Engine) Advance(ctx context.Context, jobID string, updatedJob *schema.J
 
 	msg := &schema.StageMessage{
 		JobID:   jobID,
-		Stage:   nextStage(updatedJob.Stage),
+		Stage:   nextStage,
 		Payload: b,
 	}
 
@@ -101,7 +101,7 @@ func (e *Engine) Advance(ctx context.Context, jobID string, updatedJob *schema.J
 		return fmt.Errorf("publish to %s: %w", nextQueue, err)
 	}
 
-	slog.Info("stage advanced", "job_id", jobID, "next_stage", nextStage(updatedJob.Stage))
+	slog.Info("stage advanced", "job_id", jobID, "next_stage", nextStage)
 	return nil
 }
 
@@ -110,42 +110,32 @@ func (e *Engine) FailJob(ctx context.Context, jobID, reason string) error {
 	return e.r.SetStage(ctx, jobID, "failed", string(schema.StatusFailed))
 }
 
-// nextStageQueue 返回当前阶段完成后应推送到哪个队列
-func nextStageQueue(current schema.Stage) (string, bool) {
+// nextStageRoute 返回当前 Job 完成后应推送到的队列和下一个阶段。
+func nextStageRoute(job *schema.Job) (string, schema.Stage, bool) {
+	if job.Stage == schema.StageReview {
+		if job.Review != nil && job.Review.Verdict == "rewrite" {
+			return queue.QueueWrite, schema.StageWrite, true
+		}
+		return queue.QueueVideo, schema.StageVideo, true
+	}
+
 	order := []struct {
-		stage Stage
+		stage schema.Stage
 		q     string
+		next  schema.Stage
 	}{
-		{schema.StageCrawl, queue.QueueDedup},
-		{schema.StageDedup, queue.QueueAnalyze},
-		{schema.StageAnalyze, queue.QueueWrite},
-		{schema.StageWrite, queue.QueueVideo},
-		{schema.StageVideo, queue.QueuePublish},
+		{schema.StageCrawl, queue.QueueDedup, schema.StageDedup},
+		{schema.StageDedup, queue.QueueAnalyze, schema.StageAnalyze},
+		{schema.StageAnalyze, queue.QueueWrite, schema.StageWrite},
+		{schema.StageWrite, queue.QueueReview, schema.StageReview},
+		{schema.StageVideo, queue.QueuePublish, schema.StagePublish},
 	}
 	for _, s := range order {
-		if s.stage == current {
-			return s.q, true
+		if s.stage == job.Stage {
+			return s.q, s.next, true
 		}
 	}
-	return "", false
-}
-
-// nextStage 返回下一个阶段枚举值
-func nextStage(current schema.Stage) schema.Stage {
-	order := []schema.Stage{
-		schema.StageCrawl,
-		schema.StageDedup,
-		schema.StageAnalyze,
-		schema.StageWrite,
-		schema.StageVideo,
-		schema.StagePublish,
-	}
-	for i, s := range order {
-		if s == current && i+1 < len(order) {
-			return order[i+1]
-		}
-	}
-	return current
+	return "", "", false
 }
 
 // type alias 避免 import cycle

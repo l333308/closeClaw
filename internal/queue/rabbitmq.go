@@ -15,13 +15,14 @@ const (
 	QueueDedup   = "closeclaw.dedup"
 	QueueAnalyze = "closeclaw.analyze"
 	QueueWrite   = "closeclaw.write"
+	QueueReview  = "closeclaw.review"
 	QueueVideo   = "closeclaw.video"
 	QueuePublish = "closeclaw.publish"
 )
 
 // AllQueues 按执行顺序列出所有队列
 var AllQueues = []string{
-	QueueCrawl, QueueDedup, QueueAnalyze, QueueWrite, QueueVideo, QueuePublish,
+	QueueCrawl, QueueDedup, QueueAnalyze, QueueWrite, QueueReview, QueueVideo, QueuePublish,
 }
 
 // Client 封装 RabbitMQ 连接与 channel

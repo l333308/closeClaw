@@ -1,4 +1,4 @@
-"""Analyzer Agent — 使用 Qwen 分析热点，产出摘要/关键词/情感/相关度。"""
+"""Analyzer Agent — 使用 Qwen 分析热点，产出可直接写文案的分析素材。"""
 
 from __future__ import annotations
 
@@ -17,14 +17,35 @@ QWEN_BASE_URL = os.getenv("QWEN_BASE_URL", "https://dashscope.aliyuncs.com/compa
 
 QUEUE_NAME = "closeclaw.analyze"
 
-SYSTEM_PROMPT = """你是一个 AI 行业分析师。分析给定的新闻/文章，输出严格 JSON，格式：
+SYSTEM_PROMPT = """你是一个擅长拆解 AI 热点的短视频选题编辑。
+你的目标不是做百科摘要，而是给下游文案 Agent 提供可直接写成爆款口播的素材。
+
+分析给定的新闻/文章，输出严格 JSON，格式：
 {
   "summary": "一句话摘要（不超过50字）",
   "keywords": ["关键词1", "关键词2", "关键词3"],
   "sentiment": "positive|neutral|negative",
-  "relevance": 0.0~1.0（与AI行业的相关程度）
+  "relevance": 0.0~1.0,
+  "core_point": "这条热点最炸的一个点（不超过30字）",
+  "why_it_matters": "为什么这件事值得关注（不超过40字）",
+  "impact_on_people": "对普通人、开发者或公司的实际影响（不超过40字）",
+  "stance_hint": "建议文案采用的判断/态度（不超过30字）"
 }
-只输出 JSON，不要其他内容。"""
+
+规则：
+1. 只抓一个最值得讲的点，不要面面俱到。
+2. 优先提炼冲突、风险、机会、反常识。
+3. `stance_hint` 必须有方向感，不能只是中性复述。
+4. 只输出 JSON，不要其他内容。"""
+
+
+def _parse_json_response(raw: str) -> dict:
+    raw = raw.strip()
+    if raw.startswith("```"):
+        parts = raw.split("```")
+        if len(parts) >= 2:
+            raw = parts[1].lstrip("json").strip()
+    return json.loads(raw)
 
 
 def analyze(title: str, content: str) -> AnalysisResult:
@@ -47,13 +68,17 @@ def analyze(title: str, content: str) -> AnalysisResult:
     )
 
     raw = resp.choices[0].message.content.strip()
-    data = json.loads(raw)
+    data = _parse_json_response(raw)
 
     return AnalysisResult(
         summary=data["summary"],
         keywords=data["keywords"],
         sentiment=data["sentiment"],
         relevance=float(data["relevance"]),
+        core_point=data.get("core_point", ""),
+        why_it_matters=data.get("why_it_matters", ""),
+        impact_on_people=data.get("impact_on_people", ""),
+        stance_hint=data.get("stance_hint", ""),
     )
 
 

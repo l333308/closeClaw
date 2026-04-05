@@ -1,4 +1,4 @@
-.PHONY: infra infra-down infra-logs reset-data check-compose run build agents agents-stop lint fmt tidy help
+.PHONY: infra infra-down infra-logs reset-data check-compose run build agents agents-stop copy-validate lint fmt tidy help
 
 # ─── 变量 ────────────────────────────────────────────────────────────────────
 
@@ -77,6 +77,7 @@ agents:
 	$(AGENT_ENV) PYTHONPATH=$(PWD) .venv/bin/python agents/dedup/main.py     >> logs/dedup.log    2>&1 &
 	$(AGENT_ENV) PYTHONPATH=$(PWD) .venv/bin/python agents/analyzer/main.py  >> logs/analyzer.log 2>&1 &
 	$(AGENT_ENV) PYTHONPATH=$(PWD) .venv/bin/python agents/writer/main.py    >> logs/writer.log   2>&1 &
+	$(AGENT_ENV) PYTHONPATH=$(PWD) .venv/bin/python agents/review/main.py    >> logs/review.log   2>&1 &
 	$(AGENT_ENV) PYTHONPATH=$(PWD) .venv/bin/python agents/video/main.py     >> logs/video.log    2>&1 &
 	$(AGENT_ENV) PYTHONPATH=$(PWD) .venv/bin/python agents/publisher/main.py >> logs/publisher.log 2>&1 &
 	@echo "✓ all agents started. logs/ 目录可查看各 agent 日志"
@@ -87,6 +88,7 @@ agents-stop:
 	@pkill -f "agents/dedup/main.py"     2>/dev/null || true
 	@pkill -f "agents/analyzer/main.py"  2>/dev/null || true
 	@pkill -f "agents/writer/main.py"    2>/dev/null || true
+	@pkill -f "agents/review/main.py"    2>/dev/null || true
 	@pkill -f "agents/video/main.py"     2>/dev/null || true
 	@pkill -f "agents/publisher/main.py" 2>/dev/null || true
 	@echo "✓ all agents stopped"
@@ -98,6 +100,10 @@ trigger:
 ## jobs: 列出所有 Job
 jobs:
 	curl -s http://localhost:8080/jobs | python3 -m json.tool
+
+## copy-validate: 运行固定热点样例，生成文案验收结果
+copy-validate:
+	PYTHONPATH=$(PWD) .venv/bin/python scripts/run_copy_quality_samples.py
 
 ## open-latest: 用系统播放器打开最新生成的视频
 open-latest:
