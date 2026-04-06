@@ -2,10 +2,10 @@
 
 视频结构：
   ┌─────────────────────┐
-  │  顶部品牌栏（AI头条）  │  0~140px
+  │  左上轻量角标         │
   ├─────────────────────┤
   │                     │
-  │   标题（入场动画）    │  ~220px
+  │   标题（入场动画）    │  ~160px
   │                     │
   │   背景：动态渐变      │
   │   或 Pexels 素材     │
@@ -30,11 +30,13 @@ import hashlib
 import os
 import subprocess
 import sys
+import time
 import uuid
 from pathlib import Path
 
 import edge_tts
 import requests
+from volcenginesdkarkruntime import Ark
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../"))
 from shared.schema.job import Job, Stage, Status, StageMessage, VideoResult
@@ -46,7 +48,18 @@ OUTPUT_DIR    = os.getenv("VIDEO_OUTPUT_DIR", "output/videos")
 ASSETS_DIR    = os.getenv("VIDEO_ASSETS_DIR", "output/assets")
 TTS_DIR       = os.getenv("VIDEO_TTS_DIR",    "output/tts")
 TTS_VOICE     = os.getenv("TTS_VOICE", "zh-CN-XiaoxiaoNeural")
+VIDEO_GENERATION_BACKEND = os.getenv("VIDEO_GENERATION_BACKEND", "doubao_seedance").strip().lower()
+
 PEXELS_API_KEY = os.getenv("PEXELS_API_KEY", "")
+VOLCENGINE_ARK_BASE_URL = os.getenv("VOLCENGINE_ARK_BASE_URL", "https://ark.cn-beijing.volces.com").rstrip("/")
+VOLCENGINE_ARK_API_KEY = os.getenv("VOLCENGINE_ARK_API_KEY", "")
+# 2026-04 当前默认使用 1.5 Pro；若后续 2.0 Fast 开放稳定 API，可直接改回 doubao-seedance-2.0-fast。
+DOUBAO_SEEDANCE_MODEL = os.getenv("DOUBAO_SEEDANCE_MODEL", "doubao-seedance-1-5-pro-251215")
+DOUBAO_SEEDANCE_DURATION = int(os.getenv("DOUBAO_SEEDANCE_DURATION", "5"))
+DOUBAO_SEEDANCE_ASPECT_RATIO = os.getenv("DOUBAO_SEEDANCE_ASPECT_RATIO", "9:16")
+DOUBAO_SEEDANCE_RESOLUTION = os.getenv("DOUBAO_SEEDANCE_RESOLUTION", "1080p")
+DOUBAO_SEEDANCE_POLL_INTERVAL_SEC = float(os.getenv("DOUBAO_SEEDANCE_POLL_INTERVAL_SEC", "5"))
+DOUBAO_SEEDANCE_TIMEOUT_SEC = int(os.getenv("DOUBAO_SEEDANCE_TIMEOUT_SEC", "180"))
 
 VIDEO_WIDTH  = 1080
 VIDEO_HEIGHT = 1920
@@ -155,12 +168,229 @@ def download_pexels_video(keywords: list[str]) -> str | None:
         return None
 
 
-def get_background_video(keywords: list[str]) -> str | None:
-    """按优先级返回背景视频路径：本地素材 > Pexels > None（内置动画）。"""
+def get_classic_background_video(keywords: list[str]) -> str | None:
+    """旧背景视频模式：本地素材 > Pexels > None（内置动画）。"""
     local = get_local_asset()
     if local:
         return local
     return download_pexels_video(keywords)
+
+
+def _seedance_sdk_base_url() -> str:
+    base_url = VOLCENGINE_ARK_BASE_URL.rstrip("/")
+    if not base_url.endswith("/api/v3"):
+        base_url = f"{base_url}/api/v3"
+    return base_url
+
+
+@functools.lru_cache(maxsize=1)
+def _seedance_client() -> Ark:
+    if not VOLCENGINE_ARK_API_KEY:
+        raise RuntimeError("VOLCENGINE_ARK_API_KEY is not set")
+    return Ark(
+        api_key=VOLCENGINE_ARK_API_KEY,
+        base_url=_seedance_sdk_base_url(),
+    )
+
+
+def _normalize_prompt_text(text: str, limit: int = 120) -> str:
+    cleaned = " ".join(part.strip() for part in text.replace("\n", " ").split() if part.strip())
+    return cleaned[:limit]
+
+
+def _pick_seedance_visual_plan(title: str, script: str, keywords: list[str]) -> dict[str, str]:
+    source = f"{title} {script} {' '.join(keywords)}".lower()
+
+    plan = {
+        "theme": "futuristic AI newsroom, premium technology motion design",
+        "subject": "abstract AI labs, datacenters, glowing chips, neural network energy flow",
+        "motion": "slow push-in, smooth orbit camera, layered parallax, elegant motion graphics",
+        "tone": "tense, high-stakes, sharp contrast, cinematic, credible, not flashy",
+        "shots": (
+            "shot 1: strong opening with futuristic city lights or datacenter exterior; "
+            "shot 2: move into chips, screens, server racks, model activity, signal flow; "
+            "shot 3: end on a powerful wide shot with scale, tension, and momentum"
+        ),
+    }
+
+    if any(token in source for token in ("浏览器", "browser", "入口", "search", "搜索")):
+        plan.update(
+            subject="futuristic browser interface, floating windows, search panels, user-entry portals, AI assistant overlays",
+            motion="clean dolly movement, layered UI parallax, subtle camera drift, premium interface animation",
+            tone="strategic, competitive, modern, polished, high-value product launch energy",
+            shots=(
+                "shot 1: dramatic reveal of futuristic browser interface and glowing search gateway; "
+                "shot 2: multiple layered panels, AI assistant cards, user traffic flowing through the interface; "
+                "shot 3: wide hero shot showing the browser as the new digital entry point"
+            ),
+        )
+    elif any(token in source for token in ("芯片", "算力", "gpu", "server", "datacenter", "机房")):
+        plan.update(
+            subject="macro shots of advanced chips, server racks, cooling systems, datacenter corridors, electric signal flow",
+            motion="macro tracking shots, dramatic rack focus, strong depth, controlled mechanical movement",
+            tone="industrial, powerful, expensive, tense, infrastructure-level importance",
+            shots=(
+                "shot 1: dramatic datacenter corridor with cold blue lighting; "
+                "shot 2: macro close-up of chips, boards, cooling fans, energy pulses; "
+                "shot 3: large-scale compute cluster hero shot with massive industrial power"
+            ),
+        )
+    elif any(token in source for token in ("机器人", "robot", "agent", "自动化", "workflow", "干活")):
+        plan.update(
+            subject="AI agents operating interfaces, humanoid silhouettes, robotic systems, autonomous workflows, task orchestration visuals",
+            motion="confident tracking shots, interface transitions, elegant robotic motion, workflow nodes activating",
+            tone="efficient, unstoppable, slightly tense, high-productivity future",
+            shots=(
+                "shot 1: autonomous AI workflow wakes up with multiple tasks activating; "
+                "shot 2: robotic or agent-like systems operating screens and coordinated processes; "
+                "shot 3: strong payoff shot showing scale and efficiency of autonomous execution"
+            ),
+        )
+    elif any(token in source for token in ("开源", "创业", "机会", "应用层", "产品")):
+        plan.update(
+            subject="builders, startup war rooms, AI product screens, rapid prototyping tables, energetic tech workspace",
+            motion="fast but controlled camera movement, layered reveal, momentum and upward energy",
+            tone="opportunity-driven, urgent, ambitious, energetic, optimistic but competitive",
+            shots=(
+                "shot 1: ambitious tech workspace with glowing product screens; "
+                "shot 2: prototype interfaces, code-inspired visuals, fast execution energy; "
+                "shot 3: strong hero shot suggesting new opportunity and market opening"
+            ),
+        )
+
+    return plan
+
+
+def _build_seedance_prompt(title: str, script: str, keywords: list[str]) -> str:
+    short_title = _normalize_prompt_text(title, limit=40)
+    short_script = _normalize_prompt_text(script, limit=180)
+    kw = ", ".join(keywords[:6]) if keywords else "AI, technology, futuristic"
+    plan = _pick_seedance_visual_plan(title, script, keywords)
+
+    return "\n".join(
+        [
+            "Generate a premium vertical 9:16 AI news background video.",
+            "This is a background plate for a short-form AI commentary video, not the final edited video.",
+            "",
+            f"Topic title: {short_title}",
+            f"Topic keywords: {kw}",
+            f"Topic context: {short_script}",
+            "",
+            "Goal:",
+            "Create a cinematic, visually rich, believable technology scene that supports a strong spoken commentary track.",
+            "The background must feel expensive, modern, dynamic, and suitable for an AI industry breaking-news short.",
+            "",
+            "Visual direction:",
+            f"- Theme: {plan['theme']}",
+            f"- Main subject: {plan['subject']}",
+            f"- Camera and motion: {plan['motion']}",
+            f"- Tone and mood: {plan['tone']}",
+            f"- Shot progression: {plan['shots']}",
+            "",
+            "Composition rules:",
+            "- Keep the center area and lower-third visually readable for later subtitles and title overlays.",
+            "- Use strong depth, layered composition, cinematic lighting, and controlled movement.",
+            "- Use realistic detail, premium textures, volumetric light, reflections, particles, screens, and energy flow when appropriate.",
+            "- Avoid crowded framing and avoid distracting elements that fight with the narration.",
+            "",
+            "Negative constraints:",
+            "- No subtitles, no captions, no logos, no watermarks, no brand names, no readable text, no news lower-thirds.",
+            "- No presenter speaking to camera, no selfie framing, no meme style, no cheap stock-footage look.",
+            "- No flat slideshow, no low-detail animation, no oversaturated colors, no comedic tone.",
+            "",
+            "Output should feel like a polished AI-industry visual background for a high-retention short video.",
+        ]
+    )
+
+
+def _extract_sdk_video_url(task) -> str:
+    content = getattr(task, "content", None)
+    if content is None:
+        raise RuntimeError(f"Seedance task has no content: {task}")
+
+    for field in ("video_url", "file_url"):
+        candidate = getattr(content, field, None)
+        if isinstance(candidate, str) and candidate.startswith("http"):
+            return candidate
+
+    raise RuntimeError(f"Seedance task has no downloadable video url: {task}")
+
+
+def _poll_seedance_video(task_id: str):
+    client = _seedance_client()
+    deadline = time.time() + DOUBAO_SEEDANCE_TIMEOUT_SEC
+
+    while time.time() < deadline:
+        task = client.content_generation.tasks.get(task_id=task_id)
+        status = (getattr(task, "status", "") or "").lower()
+
+        if status in {"succeeded", "success", "completed"}:
+            return task
+        if status in {"failed", "error", "cancelled", "canceled"}:
+            error = getattr(task, "error", None)
+            if error is not None:
+                raise RuntimeError(f"Seedance task failed: {getattr(error, 'code', '')} {getattr(error, 'message', '')}".strip())
+            raise RuntimeError(f"Seedance task failed: {task}")
+
+        log.info("seedance task=%s status=%s", task_id, status or "unknown")
+        time.sleep(DOUBAO_SEEDANCE_POLL_INTERVAL_SEC)
+
+    raise RuntimeError(f"Seedance task timed out after {DOUBAO_SEEDANCE_TIMEOUT_SEC}s: {task_id}")
+
+
+def generate_seedance_background_video(title: str, script: str, keywords: list[str]) -> str:
+    client = _seedance_client()
+    prompt = _build_seedance_prompt(title, script, keywords)
+    cache_key = hashlib.md5(
+        f"{DOUBAO_SEEDANCE_MODEL}|{DOUBAO_SEEDANCE_DURATION}|{DOUBAO_SEEDANCE_ASPECT_RATIO}|{title}|{script}|{'/'.join(keywords)}".encode(
+            "utf-8"
+        )
+    ).hexdigest()[:12]
+    cache_path = os.path.join(ASSETS_DIR, f"seedance_{cache_key}.mp4")
+    if os.path.exists(cache_path):
+        log.info("seedance cache hit: %s", cache_path)
+        return cache_path
+
+    Path(ASSETS_DIR).mkdir(parents=True, exist_ok=True)
+    task = client.content_generation.tasks.create(
+        model=DOUBAO_SEEDANCE_MODEL,
+        content=[{"type": "text", "text": prompt}],
+        duration=DOUBAO_SEEDANCE_DURATION,
+        ratio=DOUBAO_SEEDANCE_ASPECT_RATIO,
+        resolution=DOUBAO_SEEDANCE_RESOLUTION,
+        watermark=False,
+    )
+    task_id = getattr(task, "id", "")
+    if not task_id:
+        raise RuntimeError(f"Seedance create returned no task id: {task}")
+    log.info("seedance task created id=%s model=%s", task_id, DOUBAO_SEEDANCE_MODEL)
+
+    result_task = _poll_seedance_video(task_id)
+    video_url = _extract_sdk_video_url(result_task)
+
+    with requests.get(video_url, stream=True, timeout=120) as download_resp:
+        download_resp.raise_for_status()
+        with open(cache_path, "wb") as f:
+            for chunk in download_resp.iter_content(chunk_size=8192):
+                if chunk:
+                    f.write(chunk)
+
+    log.info("seedance video saved: %s", cache_path)
+    return cache_path
+
+
+def _load_background_video(title: str, script: str, keywords: list[str]) -> str | None:
+    # 默认启用火山 Doubao Seedance；如需切回旧模式，请把 VIDEO_GENERATION_BACKEND 改成 classic。
+    if VIDEO_GENERATION_BACKEND == "classic":
+        return get_classic_background_video(keywords)
+
+    if VIDEO_GENERATION_BACKEND in {"doubao_seedance", "doubao-seedance", "seedance", "doubao"}:
+        return generate_seedance_background_video(title, script, keywords)
+
+    raise RuntimeError(
+        f"unsupported VIDEO_GENERATION_BACKEND={VIDEO_GENERATION_BACKEND!r}; "
+        "use doubao_seedance or classic"
+    )
 
 
 # ── 视频合成 ───────────────────────────────────────────────────────────────────
@@ -252,16 +482,16 @@ def _build_filter(
         )
         audio_idx = "1"
 
-    # 顶部品牌栏（半透明黑底 + 品牌文字）
+    # 左上角轻量品牌角标，避免整条新闻栏压住画面
     brand = (
         f"[bg]"
-        f"drawbox=x=0:y=0:w=iw:h=150:color=black@0.65:thickness=fill,"
-        f"drawbox=x=0:y=150:w=iw:h=4:color={ACCENT_COLOR}@1:thickness=fill"
+        f"drawbox=x=42:y=42:w=18:h=58:color={ACCENT_COLOR}@0.95:thickness=fill,"
+        f"drawbox=x=72:y=34:w=230:h=74:color=black@0.35:thickness=fill"
     )
     if has_drawtext:
         brand += (
-            f",drawtext=text='AI 头条'{font_opt}:fontsize=52:fontcolor={ACCENT_COLOR}:"
-            f"x=(w-text_w)/2:y=50"
+            f",drawtext=text='CloseClaw'{font_opt}:fontsize=34:fontcolor=white@0.88:"
+            f"x=86:y=54"
         )
     brand += "[branded];"
 
@@ -272,7 +502,7 @@ def _build_filter(
             f"drawtext=text='{safe_title}'{font_opt}:"
             f"fontsize=64:fontcolor=white:"
             f"x=(w-text_w)/2:"
-            f"y=if(gte(t\\,0.4)\\,220\\,220+(-0.4+t)*(-500)):"
+            f"y=if(gte(t\\,0.4)\\,160\\,160+(-0.4+t)*(-500)):"
             f"shadowcolor=black@0.9:shadowx=3:shadowy=3:"
             f"borderw=2:bordercolor=black@0.4"
             f"[titled];"
@@ -337,6 +567,7 @@ def compose_video(
     srt_path: str,
     output_path: str,
     title: str,
+    script: str,
     keywords: list[str],
 ) -> int:
     font       = find_chinese_font()
@@ -350,11 +581,11 @@ def compose_video(
     except Exception:
         audio_duration = 0.0
 
-    bg = get_background_video(keywords)
+    bg = _load_background_video(title, script, keywords)
 
     if bg:
         inputs = ["-stream_loop", "-1", "-i", bg, "-i", audio_path]
-        log.info("using background video: %s", bg)
+        log.info("using background video backend=%s path=%s", VIDEO_GENERATION_BACKEND, bg)
     else:
         inputs = [
             "-f", "lavfi",
@@ -465,7 +696,7 @@ def handle(msg: StageMessage) -> None:
 
     try:
         asyncio.run(_tts_with_subtitles(job.copy.script, audio_path, srt_path))
-        duration = compose_video(audio_path, srt_path, output_path, job.copy.title, keywords)
+        duration = compose_video(audio_path, srt_path, output_path, job.copy.title, job.copy.script, keywords)
         generate_thumbnail(output_path, thumb_path)
     except Exception as exc:
         fail_job(msg.job_id, f"video generation failed: {exc}")

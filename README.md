@@ -96,6 +96,11 @@ CLAUDE_MODEL_GEEK=claude-sonnet-4-6
 COPY_REVIEW_MIN_SCORE=7
 COPY_MAX_REWRITES=2
 
+# 视频生成后端（默认火山 Seedance；切回旧模式改成 classic）
+VIDEO_GENERATION_BACKEND=doubao_seedance
+VOLCENGINE_ARK_API_KEY=...
+DOUBAO_SEEDANCE_MODEL=doubao-seedance-1-5-pro-251215
+
 # 发布通知（飞书 / 企业微信 / 自定义）
 WEBHOOK_TYPE=feishu
 PUBLISH_WEBHOOK_URL=...
@@ -175,6 +180,18 @@ logs/publisher.log
 其中 `dedup` 会默认加载仓库内 `models/all-MiniLM-L6-v2/`，因此正常情况下不再依赖 Hugging Face 首次在线下载。
 
 其中 `review` 会在 `writer` 之后对文案做 4 维评分：`吸引力 / 情绪 / 信息密度 / 传播性`。任一项低于阈值时，会带着反馈把任务退回 `writer` 重写；超过最大重写次数后会直接失败，不再进入视频阶段。
+
+其中 `video` 现在默认接入火山引擎 Seedance 视频模型生成竖屏背景视频，再叠加 TTS、标题和字幕完成最终视频。考虑到你提到 `2.0-fast` 当前还不适合直接走 API，默认模型已切到 `doubao-seedance-1-5-pro-251215`；后续若官方开放稳定 API，再切回 `2.0-fast` 即可。
+
+如果你想手动切回旧的视频生成方式（本地素材 / Pexels / 内置渐变背景），把：
+
+```ini
+VIDEO_GENERATION_BACKEND=classic
+```
+
+即可。代码里也保留了切换注释，位置在 `agents/video/main.py` 的 `compose_video()` 内。
+
+默认情况下，`doubao_seedance` 不会再自动回退到 `classic`；如果火山接口报错，任务会直接失败，便于排查真实视频接口问题。
 
 停止所有 agents：
 

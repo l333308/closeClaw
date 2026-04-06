@@ -7,3 +7,4 @@ sentence-transformers>=3.3.0
 edge-tts>=6.1.12
 mutagen>=1.47.0
 socksio>=1.0.0
+volcengine-python-sdk[ark]>=5.0.22
