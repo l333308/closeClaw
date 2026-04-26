@@ -91,10 +91,17 @@ CLAUDE_MODEL_ANY=claude-opus-4-6
 CLAUDE_BASE_URL_GEEK=...
 CLAUDE_API_KEY_GEEK=...
 CLAUDE_MODEL_GEEK=claude-sonnet-4-6
+CLAUDE_SOURCE_ORDER=geek,any
 
 # 文案质量控制
 COPY_REVIEW_MIN_SCORE=7
 COPY_MAX_REWRITES=2
+MAX_VIDEOS_PER_TRIGGER=3
+
+# Agent 并发度（提速 analyze/write/review）
+ANALYZER_WORKERS=2
+WRITER_WORKERS=2
+REVIEW_WORKERS=2
 
 # 视频生成后端（默认火山 Seedance；切回旧模式改成 classic）
 VIDEO_GENERATION_BACKEND=doubao_seedance
@@ -179,7 +186,13 @@ logs/publisher.log
 
 其中 `dedup` 会默认加载仓库内 `models/all-MiniLM-L6-v2/`，因此正常情况下不再依赖 Hugging Face 首次在线下载。
 
+其中 `writer / review` 会按 `CLAUDE_SOURCE_ORDER` 指定的顺序选择 Claude 源。默认配置是 `geek,any`，优先走当前更稳定的源，避免先打一轮已知会失败的主源再回退。
+
 其中 `review` 会在 `writer` 之后对文案做 4 维评分：`吸引力 / 情绪 / 信息密度 / 传播性`。任一项低于阈值时，会带着反馈把任务退回 `writer` 重写；超过最大重写次数后会直接失败，不再进入视频阶段。
+
+其中 `ANALYZER_WORKERS`、`WRITER_WORKERS`、`REVIEW_WORKERS` 可以控制并发 worker 数。对于单次 `trigger` 下会扇出多个 topic 子 job 的场景，适当提高这三个值可以明显缩短 `analyze + write + review` 的总墙钟时间。
+
+另外，为了控制 Seedance 成本，单次 `trigger` 在进入视频阶段前会做一次批次内排序：前面的抓取、URL 去重、向量去重、分析、写稿、评分流程保持不变；当同一批候选文案都完成评分后，系统会按“文案质量 + 热点热度 - 重写惩罚”综合排序，只取前 `MAX_VIDEOS_PER_TRIGGER` 条进入 `video`，其余文案会保留在评估结果里，但不会生成视频。
 
 其中 `video` 现在默认接入火山引擎 Seedance 视频模型生成竖屏背景视频，再叠加 TTS、标题和字幕完成最终视频。考虑到你提到 `2.0-fast` 当前还不适合直接走 API，默认模型已切到 `doubao-seedance-1-5-pro-251215`；后续若官方开放稳定 API，再切回 `2.0-fast` 即可。
 
@@ -208,6 +221,8 @@ Orchestrator 提供以下管理接口：
 | `POST` | `/jobs/trigger` | 手动触发一次 pipeline |
 | `GET` | `/jobs` | 列出所有 Job ID |
 | `GET` | `/jobs/{id}` | 查看单个 Job 详情 |
+| `GET` | `/triggers/{id}/jobs` | 查看同一 trigger 下的所有子 Job |
+| `POST` | `/jobs/{id}/snapshot` | 仅保存当前 Job 快照，不推进阶段 |
 | `POST` | `/jobs/{id}/advance` | Agent 回调，推进到下一阶段 |
 | `POST` | `/jobs/{id}/fail` | Agent 报告当前阶段失败 |
 | `GET` | `/healthz` | 健康检查 |

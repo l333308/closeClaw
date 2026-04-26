@@ -83,6 +83,14 @@ def advance_job(job: Job) -> None:
     log.info("advanced job=%s stage=%s", job.id, job.stage)
 
 
+def save_job_snapshot(job: Job) -> None:
+    """仅持久化当前 Job 快照，不推进下一阶段。"""
+    url = f"{ORCHESTRATOR_URL}/jobs/{job.id}/snapshot"
+    resp = requests.post(url, json=job.to_dict(), timeout=10)
+    resp.raise_for_status()
+    log.info("snapshot saved job=%s stage=%s status=%s", job.id, job.stage, job.status)
+
+
 def fail_job(job_id: str, reason: str) -> None:
     """通知 Orchestrator 当前阶段失败。"""
     url = f"{ORCHESTRATOR_URL}/jobs/{job_id}/fail"

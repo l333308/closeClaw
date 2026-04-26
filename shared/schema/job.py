@@ -176,10 +176,14 @@ class Job:
     id: str
     stage: Stage
     status: Status
+    trigger_job_id: str = ""
     created_at: datetime = field(default_factory=datetime.utcnow)
     updated_at: datetime = field(default_factory=datetime.utcnow)
     error: str = ""
     copy_rewrite_count: int = 0
+    batch_topic_count: int = 0
+    video_rank_score: float = 0.0
+    video_pick_status: str = ""
     topic: Optional[HotTopic] = None
     analysis: Optional[AnalysisResult] = None
     copy: Optional[CopyResult] = None
@@ -189,12 +193,16 @@ class Job:
     def to_dict(self) -> dict:
         return {
             "id": self.id,
+            "trigger_job_id": self.trigger_job_id,
             "stage": self.stage.value,
             "status": self.status.value,
             "created_at": self.created_at.strftime("%Y-%m-%dT%H:%M:%SZ"),
             "updated_at": self.updated_at.strftime("%Y-%m-%dT%H:%M:%SZ"),
             "error": self.error,
             "copy_rewrite_count": self.copy_rewrite_count,
+            "batch_topic_count": self.batch_topic_count,
+            "video_rank_score": self.video_rank_score,
+            "video_pick_status": self.video_pick_status,
             "topic": self.topic.to_dict() if self.topic else None,
             "analysis": self.analysis.to_dict() if self.analysis else None,
             "copy": self.copy.to_dict() if self.copy else None,
@@ -209,12 +217,16 @@ class Job:
     def from_dict(cls, d: dict) -> "Job":
         return cls(
             id=d["id"],
+            trigger_job_id=d.get("trigger_job_id", ""),
             stage=Stage(d["stage"]),
             status=Status(d["status"]),
             created_at=_parse_datetime(d["created_at"]),
             updated_at=_parse_datetime(d["updated_at"]),
             error=d.get("error", ""),
             copy_rewrite_count=d.get("copy_rewrite_count", 0),
+            batch_topic_count=d.get("batch_topic_count", 0),
+            video_rank_score=float(d.get("video_rank_score", 0.0) or 0.0),
+            video_pick_status=d.get("video_pick_status", ""),
             topic=HotTopic.from_dict(d["topic"]) if d.get("topic") else None,
             analysis=AnalysisResult.from_dict(d["analysis"]) if d.get("analysis") else None,
             copy=CopyResult.from_dict(d["copy"]) if d.get("copy") else None,

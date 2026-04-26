@@ -101,6 +101,8 @@ def handle(msg: StageMessage) -> None:
             id=str(uuid.uuid4()),
             stage=Stage.CRAWL,
             status=Status.DONE,
+            trigger_job_id=msg.job_id,
+            batch_topic_count=len(topics),
             topic=topic,
         )
         try:

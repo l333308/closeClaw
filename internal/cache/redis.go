@@ -10,8 +10,9 @@ import (
 )
 
 const (
-	jobKeyPrefix = "closeclaw:job:"
-	jobTTL       = 48 * time.Hour
+	jobKeyPrefix     = "closeclaw:job:"
+	triggerKeyPrefix = "closeclaw:trigger:"
+	jobTTL           = 48 * time.Hour
 )
 
 // Client 封装 Redis 操作，用于持久化 Job 状态
@@ -57,7 +58,25 @@ func (c *Client) SaveJob(ctx context.Context, job any) error {
 	}
 
 	key := jobKeyPrefix + id
-	return c.rdb.Set(ctx, key, b, jobTTL).Err()
+	if err := c.rdb.Set(ctx, key, b, jobTTL).Err(); err != nil {
+		return err
+	}
+
+	var triggerJobID string
+	if rawTrigger, ok := raw["trigger_job_id"]; ok {
+		_ = json.Unmarshal(rawTrigger, &triggerJobID)
+	}
+	if triggerJobID != "" {
+		triggerKey := triggerKeyPrefix + triggerJobID + ":jobs"
+		if err := c.rdb.SAdd(ctx, triggerKey, id).Err(); err != nil {
+			return err
+		}
+		if err := c.rdb.Expire(ctx, triggerKey, jobTTL).Err(); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 // GetJob 从 Redis 取回 Job JSON
@@ -104,6 +123,66 @@ func (c *Client) ListJobs(ctx context.Context) ([]string, error) {
 		ids[i] = k[len(jobKeyPrefix):]
 	}
 	return ids, nil
+}
+
+// ListJobsByTriggerJobID 返回同一 trigger 下的所有 Job JSON。
+func (c *Client) ListJobsByTriggerJobID(ctx context.Context, triggerJobID string) ([][]byte, error) {
+	if triggerJobID == "" {
+		return nil, nil
+	}
+
+	triggerKey := triggerKeyPrefix + triggerJobID + ":jobs"
+	ids, err := c.rdb.SMembers(ctx, triggerKey).Result()
+	if err != nil {
+		return nil, err
+	}
+
+	if len(ids) == 0 {
+		return c.scanJobsByTriggerJobID(ctx, triggerJobID)
+	}
+
+	jobs := make([][]byte, 0, len(ids))
+	for _, id := range ids {
+		b, err := c.GetJob(ctx, id)
+		if err != nil {
+			continue
+		}
+		jobs = append(jobs, b)
+	}
+
+	if len(jobs) == 0 {
+		return c.scanJobsByTriggerJobID(ctx, triggerJobID)
+	}
+	return jobs, nil
+}
+
+func (c *Client) scanJobsByTriggerJobID(ctx context.Context, triggerJobID string) ([][]byte, error) {
+	ids, err := c.ListJobs(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	jobs := make([][]byte, 0)
+	for _, id := range ids {
+		b, err := c.GetJob(ctx, id)
+		if err != nil {
+			continue
+		}
+
+		var raw map[string]json.RawMessage
+		if err := json.Unmarshal(b, &raw); err != nil {
+			continue
+		}
+
+		var currentTrigger string
+		if rawTrigger, ok := raw["trigger_job_id"]; ok {
+			_ = json.Unmarshal(rawTrigger, &currentTrigger)
+		}
+		if currentTrigger == triggerJobID {
+			jobs = append(jobs, b)
+		}
+	}
+	return jobs, nil
 }
 
 // Close 关闭连接

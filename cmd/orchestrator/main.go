@@ -122,10 +122,35 @@ func newHTTPServer(addr string, eng *pipeline.Engine, r *cache.Client) *http.Ser
 		w.WriteHeader(http.StatusNoContent)
 	})
 
+	// POST /jobs/{id}/snapshot — 仅保存当前 Job 快照，不推进阶段
+	mux.HandleFunc("POST /jobs/{id}/snapshot", func(w http.ResponseWriter, req *http.Request) {
+		jobID := req.PathValue("id")
+		var updatedJob schema.Job
+		if err := json.NewDecoder(req.Body).Decode(&updatedJob); err != nil {
+			http.Error(w, "invalid body", http.StatusBadRequest)
+			return
+		}
+		if updatedJob.ID == "" {
+			updatedJob.ID = jobID
+		}
+		if updatedJob.ID != jobID {
+			http.Error(w, "job id mismatch", http.StatusBadRequest)
+			return
+		}
+		updatedJob.UpdatedAt = time.Now().UTC()
+		if err := r.SaveJob(req.Context(), &updatedJob); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+
 	// POST /jobs/{id}/fail — Agent 报告失败
 	mux.HandleFunc("POST /jobs/{id}/fail", func(w http.ResponseWriter, req *http.Request) {
 		jobID := req.PathValue("id")
-		var body struct{ Reason string `json:"reason"` }
+		var body struct {
+			Reason string `json:"reason"`
+		}
 		json.NewDecoder(req.Body).Decode(&body)
 		eng.FailJob(req.Context(), jobID, body.Reason)
 		w.WriteHeader(http.StatusNoContent)
@@ -152,6 +177,24 @@ func newHTTPServer(addr string, eng *pipeline.Engine, r *cache.Client) *http.Ser
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.Write(b)
+	})
+
+	// GET /triggers/{id}/jobs — 查看同一 trigger 下的所有子 Job
+	mux.HandleFunc("GET /triggers/{id}/jobs", func(w http.ResponseWriter, req *http.Request) {
+		triggerJobID := req.PathValue("id")
+		jobs, err := r.ListJobsByTriggerJobID(req.Context(), triggerJobID)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		payload := make([]json.RawMessage, 0, len(jobs))
+		for _, job := range jobs {
+			payload = append(payload, json.RawMessage(job))
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{"jobs": payload, "count": len(payload)})
 	})
 
 	// GET /healthz

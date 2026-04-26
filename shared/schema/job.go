@@ -77,12 +77,16 @@ type VideoResult struct {
 // Job 是贯穿整个 pipeline 的核心数据结构
 type Job struct {
 	ID               string    `json:"id"`
+	TriggerJobID     string    `json:"trigger_job_id,omitempty"`
 	Stage            Stage     `json:"stage"`
 	Status           Status    `json:"status"`
 	CreatedAt        time.Time `json:"created_at"`
 	UpdatedAt        time.Time `json:"updated_at"`
 	Error            string    `json:"error,omitempty"`
 	CopyRewriteCount int       `json:"copy_rewrite_count,omitempty"`
+	BatchTopicCount  int       `json:"batch_topic_count,omitempty"`
+	VideoRankScore   float64   `json:"video_rank_score,omitempty"`
+	VideoPickStatus  string    `json:"video_pick_status,omitempty"`
 
 	Topic    *HotTopic         `json:"topic,omitempty"`
 	Analysis *AnalysisResult   `json:"analysis,omitempty"`

@@ -53,8 +53,11 @@ VIDEO_GENERATION_BACKEND = os.getenv("VIDEO_GENERATION_BACKEND", "doubao_seedanc
 PEXELS_API_KEY = os.getenv("PEXELS_API_KEY", "")
 VOLCENGINE_ARK_BASE_URL = os.getenv("VOLCENGINE_ARK_BASE_URL", "https://ark.cn-beijing.volces.com").rstrip("/")
 VOLCENGINE_ARK_API_KEY = os.getenv("VOLCENGINE_ARK_API_KEY", "")
-# 2026-04 当前默认使用 1.5 Pro；若后续 2.0 Fast 开放稳定 API，可直接改回 doubao-seedance-2.0-fast。
-DOUBAO_SEEDANCE_MODEL = os.getenv("DOUBAO_SEEDANCE_MODEL", "doubao-seedance-1-5-pro-251215")
+# 优先读取 VIDEO_MODEL，兼容旧变量 DOUBAO_SEEDANCE_MODEL。
+DOUBAO_SEEDANCE_MODEL = os.getenv(
+    "VIDEO_MODEL",
+    os.getenv("DOUBAO_SEEDANCE_MODEL", "doubao-seedance-1-5-pro-251215"),
+)
 DOUBAO_SEEDANCE_DURATION = int(os.getenv("DOUBAO_SEEDANCE_DURATION", "5"))
 DOUBAO_SEEDANCE_ASPECT_RATIO = os.getenv("DOUBAO_SEEDANCE_ASPECT_RATIO", "9:16")
 DOUBAO_SEEDANCE_RESOLUTION = os.getenv("DOUBAO_SEEDANCE_RESOLUTION", "1080p")
@@ -338,6 +341,39 @@ def _poll_seedance_video(task_id: str):
     raise RuntimeError(f"Seedance task timed out after {DOUBAO_SEEDANCE_TIMEOUT_SEC}s: {task_id}")
 
 
+def _is_seedance_fast_2_model() -> bool:
+    return "2-0-fast" in DOUBAO_SEEDANCE_MODEL or "2.0-fast" in DOUBAO_SEEDANCE_MODEL
+
+
+def _seedance_prompt_with_model_controls(prompt: str) -> str:
+    if _is_seedance_fast_2_model():
+        return prompt
+
+    # 1.5 Pro 兼容调用：将时长 / 镜头固定 / 水印等控制参数内联到文本里。
+    return (
+        f"{prompt}\n"
+        f"--duration {DOUBAO_SEEDANCE_DURATION} "
+        f"--camerafixed false "
+        f"--watermark false"
+    )
+
+
+def _seedance_create_params(prompt: str) -> dict:
+    content = [{"type": "text", "text": _seedance_prompt_with_model_controls(prompt)}]
+    params = {
+        "model": DOUBAO_SEEDANCE_MODEL,
+        "content": content,
+    }
+
+    # Seedance 2.0 Fast 继续使用顶层参数控制。
+    if _is_seedance_fast_2_model():
+        params["duration"] = DOUBAO_SEEDANCE_DURATION
+        params["ratio"] = DOUBAO_SEEDANCE_ASPECT_RATIO
+        params["watermark"] = False
+
+    return params
+
+
 def generate_seedance_background_video(title: str, script: str, keywords: list[str]) -> str:
     client = _seedance_client()
     prompt = _build_seedance_prompt(title, script, keywords)
@@ -352,14 +388,7 @@ def generate_seedance_background_video(title: str, script: str, keywords: list[s
         return cache_path
 
     Path(ASSETS_DIR).mkdir(parents=True, exist_ok=True)
-    task = client.content_generation.tasks.create(
-        model=DOUBAO_SEEDANCE_MODEL,
-        content=[{"type": "text", "text": prompt}],
-        duration=DOUBAO_SEEDANCE_DURATION,
-        ratio=DOUBAO_SEEDANCE_ASPECT_RATIO,
-        resolution=DOUBAO_SEEDANCE_RESOLUTION,
-        watermark=False,
-    )
+    task = client.content_generation.tasks.create(**_seedance_create_params(prompt))
     task_id = getattr(task, "id", "")
     if not task_id:
         raise RuntimeError(f"Seedance create returned no task id: {task}")

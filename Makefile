@@ -6,6 +6,9 @@ BINARY        := bin/orchestrator
 GO_MAIN       := ./cmd/orchestrator
 COMPOSE_CMD   := $(shell if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then printf '%s' 'docker compose'; elif command -v podman >/dev/null 2>&1 && podman compose version >/dev/null 2>&1; then printf '%s' 'podman compose'; elif command -v podman-compose >/dev/null 2>&1; then printf '%s' 'podman-compose'; fi)
 AGENT_ENV     := no_proxy=localhost,127.0.0.1,::1 NO_PROXY=localhost,127.0.0.1,::1 HF_ENDPOINT=$${HF_ENDPOINT:-https://hf-mirror.com} HF_HOME=$(PWD)/.cache/huggingface TRANSFORMERS_CACHE=$(PWD)/.cache/huggingface/transformers HF_HUB_DOWNLOAD_TIMEOUT=$${HF_HUB_DOWNLOAD_TIMEOUT:-60} HF_HUB_ETAG_TIMEOUT=$${HF_HUB_ETAG_TIMEOUT:-30}
+ANALYZER_WORKERS ?= 2
+WRITER_WORKERS   ?= 2
+REVIEW_WORKERS   ?= 2
 
 # ─── 基础设施（Podman） ────────────────────────────────────────────────────────
 
@@ -75,9 +78,18 @@ agents:
 	@mkdir -p logs
 	$(AGENT_ENV) PYTHONPATH=$(PWD) .venv/bin/python agents/crawler/main.py   >> logs/crawler.log  2>&1 &
 	$(AGENT_ENV) PYTHONPATH=$(PWD) .venv/bin/python agents/dedup/main.py     >> logs/dedup.log    2>&1 &
-	$(AGENT_ENV) PYTHONPATH=$(PWD) .venv/bin/python agents/analyzer/main.py  >> logs/analyzer.log 2>&1 &
-	$(AGENT_ENV) PYTHONPATH=$(PWD) .venv/bin/python agents/writer/main.py    >> logs/writer.log   2>&1 &
-	$(AGENT_ENV) PYTHONPATH=$(PWD) .venv/bin/python agents/review/main.py    >> logs/review.log   2>&1 &
+	@i=1; while [ $$i -le $(ANALYZER_WORKERS) ]; do \
+		$(AGENT_ENV) PYTHONPATH=$(PWD) .venv/bin/python agents/analyzer/main.py >> logs/analyzer.log 2>&1 & \
+		i=$$((i+1)); \
+	done
+	@i=1; while [ $$i -le $(WRITER_WORKERS) ]; do \
+		$(AGENT_ENV) PYTHONPATH=$(PWD) .venv/bin/python agents/writer/main.py   >> logs/writer.log   2>&1 & \
+		i=$$((i+1)); \
+	done
+	@i=1; while [ $$i -le $(REVIEW_WORKERS) ]; do \
+		$(AGENT_ENV) PYTHONPATH=$(PWD) .venv/bin/python agents/review/main.py   >> logs/review.log   2>&1 & \
+		i=$$((i+1)); \
+	done
 	$(AGENT_ENV) PYTHONPATH=$(PWD) .venv/bin/python agents/video/main.py     >> logs/video.log    2>&1 &
 	$(AGENT_ENV) PYTHONPATH=$(PWD) .venv/bin/python agents/publisher/main.py >> logs/publisher.log 2>&1 &
 	@echo "✓ all agents started. logs/ 目录可查看各 agent 日志"

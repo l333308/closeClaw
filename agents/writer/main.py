@@ -17,6 +17,7 @@ from agents.base import consume_queue, advance_job, fail_job, log
 
 QUEUE_NAME = "closeclaw.write"
 CLAUDE_REQUEST_TIMEOUT = float(os.getenv("CLAUDE_REQUEST_TIMEOUT", "25"))
+CLAUDE_SOURCE_ORDER = os.getenv("CLAUDE_SOURCE_ORDER", "geek,any")
 
 
 @dataclass
@@ -137,7 +138,10 @@ def _load_sources() -> list[ClaudeSource]:
             model=os.getenv("CLAUDE_MODEL_GEEK", "claude-sonnet-4-6"),
         ),
     ]
-    return [s for s in candidates if s.api_key and s.base_url]
+    available = [s for s in candidates if s.api_key and s.base_url]
+    order = {name.strip(): idx for idx, name in enumerate(CLAUDE_SOURCE_ORDER.split(",")) if name.strip()}
+    available.sort(key=lambda source: (order.get(source.name, len(order)), source.name))
+    return available
 
 
 def _normalize_base_url(base_url: str) -> str:
